@@ -98,7 +98,9 @@ def has_glyph(font: ImageFont.FreeTypeFont, ch: str, cache: Dict[str, bool]) -> 
     try:
         mask = font.getmask(ch)
         result = mask.getbbox() is not None
-    except (AttributeError, ValueError, OSError):
+    except (AttributeError, ValueError, OSError, RuntimeError):
+        # 一部の文字で Pillow/RAQM のレイアウト処理が失敗しても、
+        # その文字を「グリフなし」として扱い、全体の処理を継続する。
         result = False
     cache[ch] = result
     return result
@@ -128,13 +130,17 @@ def draw_char_tile(font: ImageFont.FreeTypeFont, ch: str) -> Image.Image:
     tile = Image.new("L", (TILE_W, TILE_H), 0)
     draw = ImageDraw.Draw(tile)
 
-    bbox = font.getbbox(ch)
-    if bbox:
-        w = bbox[2] - bbox[0]
-        h = bbox[3] - bbox[1]
-        x = (TILE_W - w) // 2 - bbox[0]
-        y = (TILE_H - h) // 2 - bbox[1]
-        draw.text((x, y), ch, fill=255, font=font)
+    try:
+        bbox = font.getbbox(ch)
+        if bbox:
+            w = bbox[2] - bbox[0]
+            h = bbox[3] - bbox[1]
+            x = (TILE_W - w) // 2 - bbox[0]
+            y = (TILE_H - h) // 2 - bbox[1]
+            draw.text((x, y), ch, fill=255, font=font)
+    except (AttributeError, ValueError, OSError, RuntimeError):
+        # 描画に失敗した文字は空タイルにし、残りの文字を出力する。
+        pass
 
     return tile
 
@@ -226,19 +232,24 @@ def parse_args():
 
 
 def select_chars(args, font: ImageFont.FreeTypeFont, glyph_cache: Dict[str, bool]) -> List[str]:
+    # UTF-16 surrogate code points are not Unicode scalar values and cannot be
+    # encoded in UTF-8. Exclude them from every generated character sequence.
+    def chars_in_range(start: int, stop: int) -> List[str]:
+        return [chr(i) for i in range(start, stop) if not 0xD800 <= i <= 0xDFFF]
+
     if args.subset:
         return list(SUBSET)
     if args.ascii:
-        return [chr(i) for i in range(0x80)]
+        return chars_in_range(0, 0x80)
     if args.sjis:
-        return [chr(i) for i in range(0x10000) if is_cp932(chr(i))]
+        return [ch for ch in chars_in_range(0, 0x10000) if is_cp932(ch)]
     if args.fullwidth:
-        return [chr(i) for i in range(0x10000) if is_fullwidth(chr(i))]
+        return [ch for ch in chars_in_range(0, 0x10000) if is_fullwidth(ch)]
     if args.halfwidth:
-        return [chr(i) for i in range(0x10000) if is_halfwidth(chr(i))]
+        return [ch for ch in chars_in_range(0, 0x10000) if is_halfwidth(ch)]
     if args.all:
-        return [chr(i) for i in range(0x10000)]
-    return [chr(i) for i in range(0x10000) if has_glyph(font, chr(i), glyph_cache)]
+        return chars_in_range(0, 0x10000)
+    return [ch for ch in chars_in_range(0, 0x10000) if has_glyph(font, ch, glyph_cache)]
 
 
 def main():
@@ -248,7 +259,9 @@ def main():
     font_name = os.path.splitext(os.path.basename(font_path))[0]
 
     try:
-        font = ImageFont.truetype(font_path, 8)
+        # 8x8 タイルへの単文字描画では複雑な文字組版は不要。
+        # RAQM のレイアウト失敗を避けるため BASIC を明示する。
+        font = ImageFont.truetype(font_path, 8, layout_engine=ImageFont.Layout.BASIC)
     except Exception as e:
         print(f"エラー: フォントファイル '{font_path}' を読み込めません ({e})", file=sys.stderr)
         sys.exit(1)
