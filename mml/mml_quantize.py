@@ -1,53 +1,59 @@
 #!/usr/bin/env python3
 """
-mml_quantize.py -- MML の量子化・簡略化ツール
+mml_quantize.py -- MML quantizer and simplifier
 
-用途:
-    高解像度な MML を {2, 4, 8, 16} 分音符だけで書いたシンプルな形式に
-    量子化 (丸め) します。移調と、C メジャーから短調への変換もできます。
-入出力:
-    入力: MML ファイル 1 つ (入力の書式は下記)
-    出力: 標準出力に "O4C8 O4D4 R8" のような形式で書き出します
-          (複数チャンネルのときは、チャンネルごとに空行で区切り、先頭にチャンネル名が付きます)
-使用例:
+Usage:
+    Quantize high-resolution MML (rounding note lengths) into a simpler format
+    using only {2, 4, 8, 16} note values. Also supports transposition and
+    converting C major to a minor scale.
+Input/output:
+    Input: one MML file (see the format below)
+    Output: text such as "O4C8 O4D4 R8" to stdout. Multiple channels are
+            separated by blank lines and prefixed with their channel names.
+Examples:
     python3 mml_quantize.py song.mml --simple
     python3 mml_quantize.py song.mml --judge
     python3 mml_quantize.py song.mml --transpose -2 --minor natural
-依存: 標準ライブラリのみ
+Dependencies: Python standard library only
 
-出力モード (どれか 1 つ。同時には指定できません):
-  (無指定)  simple と exact が全チャンネルで一致したときだけ simple を出力します。
-            差分 (drift) があるときは "LOSSY" と表示し、MML は出力せず終了コード 1 で終了します。
-  --simple  丸めクオンタイズ。人間の耳に自然でコンパクトな出力になります。
-  --exact   GCD ベースの無失真クオンタイズ。丸めません (必要に応じてテンポ調整が要ります)。
-  --judge   チャンネルごとに simple と exact を比較し、ok / drift をレポートします。
-            終了コード: 0 = 全チャンネル一致, 1 = ドリフトあり
+Output modes (choose one; they are mutually exclusive):
+  (default) Output simple only if it matches exact for every channel.
+            If there is drift, print "LOSSY", do not output MML, and exit with code 1.
+  --simple  Rounded quantization; produces compact output that sounds natural.
+  --exact   Lossless GCD-based quantization; no rounding (tempo adjustment may be needed).
+  --judge   Compare simple and exact per channel and report ok / drift.
+            Exit code: 0 = all channels match, 1 = drift detected.
 
-その他のオプション:
-  --fill         短いチャンネルの末尾に休符を足して、最長チャンネルに揃えます。
-                 選んだモード (--exact なら exact、それ以外は simple) の側にだけ適用されます。
-                 --judge と併用すると simple 側だけが揃えられるため、短いチャンネルは
-                 drift と判定されます。
-  --transpose N  全ピッチを N 半音シフトします (負数 = 下げる, 正数 = 上げる)。
-  --minor MODE   C メジャーの曲を短調に変換します (natural / harmonic / melodic)。
-                 --transpose の適用後に実行されます。
+Other options:
+  --fill         Append rests to shorter channels to match the longest channel.
+                 Applied only to the selected mode (--exact if selected, otherwise simple).
+                 With --judge, only simple is padded, so shorter channels are
+                 reported as drift.
+  --transpose N  Shift all pitches by N semitones (negative = down, positive = up).
+  --minor MODE   Convert a C major song to minor (natural / harmonic / melodic).
+                 Applied after --transpose.
 
-入力 MML の書式:
-  - 行頭 (先頭に空白を置かない) が「英字 1 文字 + 空白」の行は、その英字をチャンネル名とする
-    行として扱い、同じ名前の行は連結します (例: "A O4 CDE")。単独の音名で始まる行
-    ("C D E" など) もチャンネル行になるので注意してください。
-    チャンネル行が 1 つでもあると、チャンネル行以外の行は無視されます。
-    チャンネル行が 1 つも無いときは、全行をまとめて 1 チャンネル (名前 "1") として扱い、
-    "X:" (英字 + コロン) や "@" "!" で始まる行は無視します。
-  - ";" "//" "#" で始まる行はコメントです。ただし "# Zenlen N" はファイル全体の解像度
-    (全音符あたりの tick 数, 既定 48) の指定です。
-  - 空白で区切られた単独のトークン "C<数字>" (例: " C96 ") は音符 C ではなく、
-    そのチャンネルの解像度の指定として扱われます。長さ付きの C を書くときは、
-    "L4 C" のように長さを別に指定するか、"C4D4" のように他の音符と続けてください。
-  - T / V / S / M / @ + 数字 (テンポ・音量など) は無視されます。
-  - "[...]n" は、括弧内の最後の音名だけを残し、長さ n を付けた 1 音に置き換えます。
-  - 使えるコマンド: O<n> < > L<n> 音符 CDEFGAB (# + - 付き) R, 付点, タイ "&"。
-    タイでつないだ音は 1 つの音として扱い、高さは最初の音を使います。
+Input MML format:
+  - A line starting at column 1 with one letter followed by a space is treated
+    as a channel line; lines with the same letter are concatenated
+    (e.g. "A O4 CDE"). Lines beginning with a single note name (e.g. "C D E")
+    are also channel lines. If any channel lines are found, all other lines
+    are ignored.
+    If no channel lines are found, all input lines are combined into one
+    channel named "1"; lines starting with "X:" (letter + colon), "@" or "!"
+    are ignored.
+  - Lines starting with ";", "//", or "#" are comments, except "# Zenlen N",
+    which sets the file-wide resolution in ticks per whole note (default: 48).
+  - A standalone whitespace-delimited token "C<number>" (e.g. " C96 ") sets
+    the channel resolution; it is not a C note. To write a C note with a
+    length, set the length separately (e.g. "L4 C") or join it to another
+    note (e.g. "C4D4").
+  - T / V / S / M / @ followed by a number (tempo, volume, etc.) are ignored.
+  - "[...]n" is replaced with one note: the last note inside the brackets
+    with length n.
+  - Supported commands: O<n>, <, >, L<n>, notes CDEFGAB (with #, +, or -),
+    R, dots, and ties "&". Tied notes are treated as one note and use the
+    pitch of the first note.
 """
 
 import os
@@ -62,17 +68,17 @@ from typing import List, Tuple, Optional, Dict
 
 
 # ─────────────────────────────────────────────────────────
-# 型定義
+# Type definitions
 # ─────────────────────────────────────────────────────────
 
-Pitch = Tuple   # ('R', None) または (note_str, octave)
+Pitch = Tuple   # ('R', None) or (note_str, octave)
 Note  = Tuple   # (Pitch, note_value)  note_value in {2,4,8,16}
 
 STEP_OF = {2: 8, 4: 4, 8: 2, 16: 1}
 
 
 # ─────────────────────────────────────────────────────────
-# 前処理
+# Preprocessing
 # ─────────────────────────────────────────────────────────
 
 def preprocess(mml: str) -> Tuple[str, int]:
@@ -94,7 +100,7 @@ def preprocess(mml: str) -> Tuple[str, int]:
 
 
 # ─────────────────────────────────────────────────────────
-# パース → (pitch, ticks)
+# Parse into (pitch, ticks)
 # ─────────────────────────────────────────────────────────
 
 def parse(mml: str, resolution: int) -> List[Tuple[Pitch, int]]:
@@ -183,7 +189,7 @@ def parse(mml: str, resolution: int) -> List[Tuple[Pitch, int]]:
                         tb = mml[i]
                         i += 1
                         if tb != 'R' and i < n and mml[i] in '#+-':
-                            i += 1  # タイ先の臨時記号は読み飛ばす (高さは最初の音を使う)
+                            i += 1  # Ignore the tied note's accidental; keep the first note's pitch.
                         tl = read_int() or default_length
                         ticks += to_ticks(tl, read_dots())
                 else:
@@ -197,7 +203,7 @@ def parse(mml: str, resolution: int) -> List[Tuple[Pitch, int]]:
 
 
 # ─────────────────────────────────────────────────────────
-# 分解・マージ共通
+# Shared decomposition and merging
 # ─────────────────────────────────────────────────────────
 
 def decompose(steps: int, pitch: Pitch) -> List[Note]:
@@ -298,7 +304,7 @@ def pitch_range(events):
 
 
 # ─────────────────────────────────────────────────────────
-# クオンタイズ処理
+# Quantization
 # ─────────────────────────────────────────────────────────
 
 def simple_quantize(events: List[Tuple[Pitch, int]], resolution: int) -> List[Note]:
@@ -322,7 +328,7 @@ def exact_quantize(events: List[Tuple[Pitch, int]], unit: int) -> List[Note]:
 
 
 # ─────────────────────────────────────────────────────────
-# フォーマット
+# Formatting
 # ─────────────────────────────────────────────────────────
 
 def format_output(notes: List[Note]) -> str:
@@ -337,7 +343,7 @@ def format_output(notes: List[Note]) -> str:
 
 
 # ─────────────────────────────────────────────────────────
-# ファイル読み込み・解析
+# File loading and parsing
 # ─────────────────────────────────────────────────────────
 
 def read_file(path: Path) -> Tuple[List[Tuple[str, str]], int]:
@@ -385,7 +391,7 @@ def read_file(path: Path) -> Tuple[List[Tuple[str, str]], int]:
 
 
 # ─────────────────────────────────────────────────────────
-# 変換パイプライン
+# Conversion pipeline
 # ─────────────────────────────────────────────────────────
 
 def convert_all(channel_entries: List[Tuple[str, str, int]], transpose: int = 0, minor: str = None) -> Tuple[List[dict], int]:
@@ -437,60 +443,60 @@ def apply_fill(results: List[dict], mode: str) -> List[dict]:
 
 
 # ─────────────────────────────────────────────────────────
-# main
+# Main
 # ─────────────────────────────────────────────────────────
 
 def main():
     parser = argparse.ArgumentParser(
         prog=Path(__file__).name,
-        description='MML Quantizer & Simplifier ({2,4,8,16} 分音符への量子化)。'
-                    '出力モードは --simple / --exact / --judge のどれか 1 つ (無指定は下記)。',
-        epilog="""無指定の動作:
-  simple と exact が全チャンネルで一致したときだけ simple を出力します。
-  差分 (drift) があるときは "LOSSY" と表示して終了コード 1 で終了します。
+        description='MML Quantizer & Simplifier (quantize to {2,4,8,16} note values). '
+                    'Choose one output mode: --simple / --exact / --judge (or see the default below).',
+        epilog="""Default behavior:
+  Output simple only if it matches exact for every channel.
+  If there is drift, print "LOSSY" and exit with code 1.
 
-例:
+Examples:
   python3 mml_quantize.py song.mml --simple
   python3 mml_quantize.py song.mml --exact --fill
   python3 mml_quantize.py song.mml --judge
   python3 mml_quantize.py song.mml --transpose -2 --minor natural
 
-入力 MML の書式 (チャンネル行, C<数字> が解像度指定になる点など) は、
-このファイルの先頭の説明を参照してください。""",
+For the input MML format (including channel lines and C<number> resolution
+tokens), see the description at the top of this file.""",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument('file', type=Path, help='入力 MML ファイルパス')
+    parser.add_argument('file', type=Path, help='Path to input MML file')
     mode = parser.add_mutually_exclusive_group()
-    mode.add_argument('--simple', action='store_true', help='丸めクオンタイズで出力 (人間の耳に自然でコンパクト)')
-    mode.add_argument('--exact',  action='store_true', help='GCD ベースの無失真クオンタイズで出力')
-    mode.add_argument('--judge',  action='store_true', help='チャンネルごとに simple と exact を比較し ok/drift を表示 (終了コード 0=全一致, 1=ドリフトあり)')
-    parser.add_argument('--fill',   action='store_true', help='短いチャンネルの末尾に休符を足して長さを揃える (選んだモード側にだけ適用。--judge では simple 側のみ)')
-    parser.add_argument('--transpose', type=int, default=0, metavar='N', help='指定半音数だけ移調 (正=上, 負=下)')
-    parser.add_argument('--minor', choices=['natural', 'harmonic', 'melodic'], default=None, help='C メジャーを短調に変換 (--transpose の後に適用)')
+    mode.add_argument('--simple', action='store_true', help='Use rounded quantization (compact, natural-sounding output)')
+    mode.add_argument('--exact',  action='store_true', help='Use lossless GCD-based quantization')
+    mode.add_argument('--judge',  action='store_true', help='Compare simple and exact per channel; show ok/drift (exit 0=match, 1=drift)')
+    parser.add_argument('--fill',   action='store_true', help='Append rests to shorter channels (applies only to selected mode; simple only with --judge)')
+    parser.add_argument('--transpose', type=int, default=0, metavar='N', help='Transpose by this many semitones (positive=up, negative=down)')
+    parser.add_argument('--minor', choices=['natural', 'harmonic', 'melodic'], default=None, help='Convert C major to minor (applied after --transpose)')
 
     args = parser.parse_args()
 
     if not args.file.is_file():
-        print(f"エラー: ファイル '{args.file}' が見つかりません。", file=sys.stderr)
+        print(f"Error: File not found: '{args.file}'.", file=sys.stderr)
         sys.exit(1)
 
     try:
         channel_entries_raw, file_res = read_file(args.file)
     except Exception as e:
-        print(f"エラー: ファイルの読み込みに失敗しました ({e})", file=sys.stderr)
+        print(f"Error: Could not read file ({e}).", file=sys.stderr)
         sys.exit(1)
 
     channel_entries = [(lbl, mml, file_res) for lbl, mml in channel_entries_raw]
     results, unit = convert_all(channel_entries, transpose=args.transpose, minor=args.minor)
 
-    # --fill の独立適用ロジック
+    # Apply --fill independently to the selected mode.
     if args.fill:
         if args.exact:
             results = apply_fill(results, 'exact')
         else:
             results = apply_fill(results, 'simple')
 
-    # --judge モード
+    # --judge mode
     if args.judge:
         ok = True
         for r in results:
@@ -521,13 +527,13 @@ def main():
         print_mode('exact')
         return
 
-    # オプション未指定時: ドリフト検証後に simple 出力
+    # Default mode: validate drift before outputting simple.
     drifts = [r['label'] or '1' for r in results
               if format_output(r['simple_notes']) != format_output(r['exact_notes'])]
 
     if drifts:
-        print(f"LOSSY: チャンネル {', '.join(drifts)} で simple と exact に差分が発生しました。")
-        print("--simple または --exact を明示して実行してください (必要に応じて --fill を併用)。")
+        print(f"LOSSY: simple and exact differ on channel(s): {', '.join(drifts)}.")
+        print("Specify --simple or --exact (and optionally --fill) to continue.")
         sys.exit(1)
 
     print_mode('simple')
@@ -538,7 +544,7 @@ def run():
         main()
         sys.stdout.flush()
     except BrokenPipeError:
-        # 出力先 (head など) が先に閉じた場合は、エラーを出さずに終了する
+        # Exit quietly if the output consumer (such as `head`) closes the pipe first.
         os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
         sys.exit(1)
 

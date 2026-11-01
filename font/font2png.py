@@ -5,22 +5,24 @@
 # ]
 # ///
 """
-font2png.py -- フォントファイルから 8x8 タイルの PNG (と対応する txt) を生成する
+font2png.py -- Generate an 8x8-tile PNG (and optional text file) from a font
 
-用途:
-    フォントの文字を 8x8 ピクセルのタイルとして 16 列に並べ、2 値の PNG にします。
-    ファミコン用のフォント画像を作る用途を想定し、NES 向けの 256 文字サブセット
-    (--subset) を内蔵しています。
-入出力:
-    入力: フォントファイル (.ttf / .otf)
-    出力: <フォント名>.png (PNG が正で、文字は左上から右へ 16 列ずつ並ぶ)
-          --txt / --safetxt を付けると、PNG と 1 対 1 に対応する <フォント名>.txt も出力
-          出力先は -o で指定 (省略時はカレントディレクトリ)。同名のファイルは上書きされます。
-使用例:
+Usage:
+    Arrange font glyphs as 8x8 pixel tiles in 16 columns and save them as a
+    1-bit PNG. Includes a built-in 256-character NES-oriented subset (--subset).
+Input/output:
+    Input: font file (.ttf / .otf)
+    Output: <font_name>.png (the PNG is authoritative; glyphs are ordered
+            left-to-right in 16 columns)
+            Add --txt or --safetxt to also write a matching <font_name>.txt.
+            Set the output directory with -o (defaults to the current directory).
+            Existing files with the same names are overwritten.
+Examples:
     python3 font2png.py font.ttf --subset
     python3 font2png.py font.ttf --ascii --safetxt
     python3 font2png.py font.ttf --sjis -o out/
-依存: Pillow (uv run font2png.py なら自動導入。それ以外は pip install pillow)
+Dependencies: Pillow (automatically installed with `uv run font2png.py`;
+otherwise install with `pip install pillow`)
 """
 
 import os
@@ -33,49 +35,49 @@ from typing import Dict, List, Callable, Optional
 try:
     from PIL import Image, ImageDraw, ImageFont
 except ImportError:
-    sys.exit("エラー: Pillow が必要です。`pip install pillow` するか、`uv run font2png.py ...` で実行してください。")
+    sys.exit("Error: Pillow is required. Install it with `pip install pillow` or run with `uv run font2png.py ...`.")
 
 # ============================================================
-# サブセット定義（NES 16x16 / Shift_JIS 1バイト位置対応 256文字）
+# Built-in subset: 256 characters for a 16x16 NES layout with Shift_JIS single-byte positions.
 # ============================================================
 
 SUBSET = (
-    # 0x00 - 0x0F (厳選記号 1/2)
+    # 0x00 - 0x0F (selected symbols 1/2)
     " ─│┌┐└┘├┤┬┴┼×÷⊂⊃"
-    # 0x10 - 0x1F (厳選記号 2/2)
+    # 0x10 - 0x1F (selected symbols 2/2)
     "■□▲△▼▽◆◇○◎●◯★☆♀♂"
-    # 0x20 - 0x2F (ASCII 記号・数字)
+    # 0x20 - 0x2F (ASCII symbols and digits)
     " ！＂＃＄％＆＇（）＊＋，－．／"
-    # 0x30 - 0x3F (ASCII 数字・記号)
+    # 0x30 - 0x3F (ASCII digits and symbols)
     "０１２３４５６７８９：；＜＝＞？"
-    # 0x40 - 0x4F (ASCII 英大文字)
+    # 0x40 - 0x4F (ASCII uppercase letters)
     "＠ＡＢＣＤＥＦＧＨＩＪＫＬＭＮＯ"
-    # 0x50 - 0x5F (ASCII 英大文字・記号)
+    # 0x50 - 0x5F (ASCII uppercase letters and symbols)
     "ＰＱＲＳＴＵＶＷＸＹＺ［￥］＾＿"
-    # 0x60 - 0x6F (ASCII 英小文字)
+    # 0x60 - 0x6F (ASCII lowercase letters)
     "｀ａｂｃｄｅｆｇｈｉｊｋｌｍｎｏ"
-    # 0x70 - 0x7F (ASCII 英小文字・記号)
+    # 0x70 - 0x7F (ASCII lowercase letters and symbols)
     "ｐｑｒｓｔｕｖｗｘｙｚ｛｜｝￣～"
-    # 0x80 - 0x8F (ギリシャ文字 1/2)
+    # 0x80 - 0x8F (Greek letters 1/2)
     "αβγδεζηθικλμνξοπ"
-    # 0x90 - 0x9F (ギリシャ文字 2/2・踊り字・括弧)
+    # 0x90 - 0x9F (Greek letters 2/2, iteration marks, and brackets)
     "ρστυφχψω『』【】〃々㈱㈲"
-    # 0xA0 - 0xAF (JIS X 0201位置: 記号・小文字)
+    # 0xA0 - 0xAF (JIS X 0201 positions: symbols and small kana)
     " 。「」、・をぁぃぅぇぉゃゅょっ"
-    # 0xB0 - 0xBF (JIS X 0201位置: ーあ〜そ)
+    # 0xB0 - 0xBF (JIS X 0201 positions: long vowel mark through "so")
     "ーあいうえおかきくけこさしすせそ"
-    # 0xC0 - 0xCF (JIS X 0201位置: たち〜ほ)
+    # 0xC0 - 0xCF (JIS X 0201 positions: "ta" through "ho")
     "たちつてとなにぬねのはひふへほま"
-    # 0xD0 - 0xDF (JIS X 0201位置: み〜ん・濁点)
+    # 0xD0 - 0xDF (JIS X 0201 positions: "mi" through "n", dakuten marks)
     "みむめもやゆよらりるれろわん゛゜"
-    # 0xE0 - 0xEF (NES用 汎用漢字 1)
+    # 0xE0 - 0xEF (general-purpose kanji for NES 1)
     "勇戦魔僧商遊盗賢剣鎧盾兜薬毒指輪"
-    # 0xF0 - 0xFF (NES用 汎用漢字 2)
+    # 0xF0 - 0xFF (general-purpose kanji for NES 2)
     "火水風土光無闇炎氷雷力守速命体金"
 )
 
 # ============================================================
-# 定数定義
+# Constants
 # ============================================================
 
 TILE_W = 8
@@ -89,7 +91,7 @@ MISSING_GLYPH_CHAR = "\u25A1"
 
 
 # ============================================================
-# 文字判定
+# Glyph detection
 # ============================================================
 
 def has_glyph(font: ImageFont.FreeTypeFont, ch: str, cache: Dict[str, bool]) -> bool:
@@ -99,8 +101,7 @@ def has_glyph(font: ImageFont.FreeTypeFont, ch: str, cache: Dict[str, bool]) -> 
         mask = font.getmask(ch)
         result = mask.getbbox() is not None
     except (AttributeError, ValueError, OSError, RuntimeError):
-        # 一部の文字で Pillow/RAQM のレイアウト処理が失敗しても、
-        # その文字を「グリフなし」として扱い、全体の処理を継続する。
+        # Treat layout failures for individual glyphs as missing glyphs and continue.
         result = False
     cache[ch] = result
     return result
@@ -123,7 +124,7 @@ def is_fullwidth(ch: str) -> bool:
 
 
 # ============================================================
-# タイル描画
+# Tile rendering
 # ============================================================
 
 def draw_char_tile(font: ImageFont.FreeTypeFont, ch: str) -> Image.Image:
@@ -139,14 +140,14 @@ def draw_char_tile(font: ImageFont.FreeTypeFont, ch: str) -> Image.Image:
             y = (TILE_H - h) // 2 - bbox[1]
             draw.text((x, y), ch, fill=255, font=font)
     except (AttributeError, ValueError, OSError, RuntimeError):
-        # 描画に失敗した文字は空タイルにし、残りの文字を出力する。
+        # Leave this tile blank if rendering fails, then continue with the remaining glyphs.
         pass
 
     return tile
 
 
 # ============================================================
-# テキスト変換
+# Text conversion
 # ============================================================
 
 def convert_safetxt(ch: str, font: ImageFont.FreeTypeFont, glyph_cache: Dict[str, bool]) -> str:
@@ -185,48 +186,48 @@ def build_text(chars: List[str], columns: int, transform: Optional[Callable[[str
 
 
 # ============================================================
-# メイン処理
+# Main processing
 # ============================================================
 
 def parse_args():
     parser = argparse.ArgumentParser(
         prog=os.path.basename(__file__),
-        description="フォントファイルから 8x8 タイルの PNG を生成します。"
-                    "PNG の並びが基準で、txt を出力する場合も PNG と 1 対 1 に対応します。\n"
-                    "文字集合のオプション (--ascii など) はどれか 1 つだけ指定できます。"
-                    "省略した場合は --glyphs と同じです。",
-        epilog="""例:
-  python3 font2png.py font.ttf --subset            ← NES 向け 256 文字サブセット
-  python3 font2png.py font.ttf --ascii --safetxt   ← ASCII と、表示できる txt も出力
-  python3 font2png.py font.ttf --sjis -o out/      ← Shift_JIS 文字を out/ に出力""",
+        description="Generate an 8x8-tile PNG from a font. The PNG defines the glyph order; "
+                    "any optional text output matches it one-to-one.\n"
+                    "Choose at most one character set option (--ascii, etc.). "
+                    "Defaults to --glyphs.",
+        epilog="""Examples:
+  python3 font2png.py font.ttf --subset            # Built-in 256-character NES subset
+  python3 font2png.py font.ttf --ascii --safetxt   # ASCII and a display-safe text file
+  python3 font2png.py font.ttf --sjis -o out/      # Shift_JIS characters to out/""",
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
 
     txt_group = parser.add_mutually_exclusive_group()
     txt_group.add_argument(
         "--txt", action="store_true",
-        help="PNG と同じ並びの txt を出力します (置換なし。制御文字もそのまま出力)"
+        help="Write a text file in the same order as the PNG (no substitutions; control characters are preserved)"
     )
     txt_group.add_argument(
         "--safetxt", action="store_true",
-        help="PNG と同じ並びの、表示しても安全な txt を出力します "
-             "(制御文字は制御文字記号に、グリフの無い文字は □ (U+25A1) に置換)"
+        help="Write a display-safe text file in the same order as the PNG "
+             "(control characters become control pictures; missing glyphs become □ (U+25A1))"
     )
 
-    parser.add_argument("fontfile", help="入力フォントファイル (.ttf / .otf)")
+    parser.add_argument("fontfile", help="Input font file (.ttf / .otf)")
     parser.add_argument(
         "-o", "--output-dir", default=".", metavar="DIR",
-        help="出力先ディレクトリ (既定: カレントディレクトリ。無ければ作成)"
+        help="Output directory (default: current directory; created if missing)"
     )
 
     charset = parser.add_mutually_exclusive_group()
-    charset.add_argument("--ascii", action="store_true", help="U+0000〜U+007F の文字")
-    charset.add_argument("--sjis", action="store_true", help="CP932 (Shift_JIS) で表せる文字")
-    charset.add_argument("--glyphs", action="store_true", help="フォントがグリフを持つ全文字 (既定)")
-    charset.add_argument("--fullwidth", action="store_true", help="East Asian Width が全角 (F/W) の文字のみ")
-    charset.add_argument("--halfwidth", action="store_true", help="East Asian Width が半角 (Na/H) の文字のみ")
-    charset.add_argument("--all", action="store_true", help="BMP の全文字 (U+0000〜U+FFFF)")
-    charset.add_argument("--subset", action="store_true", help="内蔵の NES 向け 256 文字サブセット")
+    charset.add_argument("--ascii", action="store_true", help="Characters U+0000-U+007F")
+    charset.add_argument("--sjis", action="store_true", help="Characters representable in CP932 (Shift_JIS)")
+    charset.add_argument("--glyphs", action="store_true", help="All characters with glyphs in the font (default)")
+    charset.add_argument("--fullwidth", action="store_true", help="Full-width characters (East Asian Width F/W)")
+    charset.add_argument("--halfwidth", action="store_true", help="Half-width characters (East Asian Width Na/H)")
+    charset.add_argument("--all", action="store_true", help="All BMP characters (U+0000-U+FFFF)")
+    charset.add_argument("--subset", action="store_true", help="Built-in 256-character NES subset")
 
     return parser.parse_args()
 
@@ -259,11 +260,11 @@ def main():
     font_name = os.path.splitext(os.path.basename(font_path))[0]
 
     try:
-        # 8x8 タイルへの単文字描画では複雑な文字組版は不要。
-        # RAQM のレイアウト失敗を避けるため BASIC を明示する。
+        # Single glyphs rendered into 8x8 tiles need no complex text layout.
+        # Select BASIC explicitly to avoid RAQM layout failures.
         font = ImageFont.truetype(font_path, 8, layout_engine=ImageFont.Layout.BASIC)
     except Exception as e:
-        print(f"エラー: フォントファイル '{font_path}' を読み込めません ({e})", file=sys.stderr)
+        print(f"Error: Could not load font file '{font_path}' ({e}).", file=sys.stderr)
         sys.exit(1)
 
     glyph_cache: Dict[str, bool] = {}
@@ -302,11 +303,11 @@ def main():
         with open(txt_name, "w", encoding="utf-8", newline="") as f:
             f.write(text_data)
 
-        print(f"生成: {png_name}, {txt_name}")
+        print(f"Generated: {png_name}, {txt_name}")
     else:
-        print(f"生成: {png_name}")
+        print(f"Generated: {png_name}")
 
-    print(f"文字数: {total}")
+    print(f"Character count: {total}")
 
 
 if __name__ == "__main__":

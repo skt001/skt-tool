@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
 """
-bin2ca65.py -- バイナリファイルを ca65 の .byte テーブルに変換する
+bin2ca65.py -- Convert a binary file to a ca65 .byte table
 
-用途:
-    パレットやフォントなどのバイナリを、ca65 アセンブラに取り込めるソース
-    (.segment 指定 + ラベル + .byte 行) に変換します。
-入出力:
-    入力: バイナリファイル 1 つ
-    出力: 標準出力にテキストを書き出します (保存はリダイレクトで行います)
-使用例:
+Usage:
+    Convert binary data such as palettes or fonts into ca65 source code
+    (.segment directive, label, and .byte lines).
+Input/output:
+    Input: one binary file
+    Output: text to stdout (redirect it to save to a file)
+Examples:
     python3 bin2ca65.py data.bin
     python3 bin2ca65.py palette.pal --label PALETTE
     python3 bin2ca65.py font.chr --segment CHARS --cols 8 > font.inc
-依存: 標準ライブラリのみ
+Dependencies: Python standard library only
 """
 
 import argparse
@@ -22,7 +22,7 @@ from pathlib import Path
 
 
 def bin_to_ca65(data: bytes, segment: str, label: str, cols: int = 16) -> str:
-    """バイナリデータを ca65 形式の .byte ソースコード文字列に変換する"""
+    """Convert binary data to a ca65 .byte source string."""
     lines = []
     lines.append(f'.segment "{segment}"')
     lines.append(f"{label}:")
@@ -40,40 +40,39 @@ def bin_to_ca65(data: bytes, segment: str, label: str, cols: int = 16) -> str:
 
 
 def positive_int(text: str) -> int:
-    """argparse 用: 1 以上の整数"""
+    """argparse type: positive integer."""
     value = int(text)
     if value < 1:
-        raise argparse.ArgumentTypeError("1 以上の整数を指定してください")
+        raise argparse.ArgumentTypeError("Value must be a positive integer.")
     return value
 
 
 def main():
     parser = argparse.ArgumentParser(
         prog=Path(__file__).name,
-        description="バイナリファイルを ca65 アセンブラ用の .byte テーブル形式テキストに変換します。"
-                    "結果は標準出力に出ます。",
-        epilog="""例:
-  python3 bin2ca65.py data.bin                        ← 既定値 (RODATA, binary_data)
-  python3 bin2ca65.py palette.pal --label PALETTE     ← ラベル指定
-  python3 bin2ca65.py font.chr --segment CHARS        ← セグメント指定
-  python3 bin2ca65.py font.chr --cols 8 > font.inc    ← 1 行 8 バイトでファイルへ保存""",
+        description="Convert a binary file to ca65 .byte table source on stdout.",
+        epilog="""Examples:
+  python3 bin2ca65.py data.bin                        # Defaults (RODATA, binary_data)
+  python3 bin2ca65.py palette.pal --label PALETTE     # Set the label
+  python3 bin2ca65.py font.chr --segment CHARS        # Set the segment
+  python3 bin2ca65.py font.chr --cols 8 > font.inc    # Save 8 bytes per line to a file""",
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    parser.add_argument("file", type=Path, help="入力バイナリファイル")
-    parser.add_argument("--segment", default="RODATA", metavar="NAME", help="セグメント名 (既定: RODATA)")
-    parser.add_argument("--label", default="binary_data", metavar="NAME", help="ラベル名 (既定: binary_data)")
-    parser.add_argument("--cols", type=positive_int, default=16, metavar="N", help="1 行あたりの出力バイト数 (既定: 16)")
+    parser.add_argument("file", type=Path, help="Input binary file")
+    parser.add_argument("--segment", default="RODATA", metavar="NAME", help="Segment name (default: RODATA)")
+    parser.add_argument("--label", default="binary_data", metavar="NAME", help="Label name (default: binary_data)")
+    parser.add_argument("--cols", type=positive_int, default=16, metavar="N", help="Bytes per output line (default: 16)")
 
     args = parser.parse_args()
 
     if not args.file.is_file():
-        print(f"エラー: ファイル '{args.file}' が見つかりません。", file=sys.stderr)
+        print(f"Error: File not found: '{args.file}'.", file=sys.stderr)
         sys.exit(1)
 
     try:
         data = args.file.read_bytes()
     except Exception as e:
-        print(f"エラー: ファイルの読み込みに失敗しました ({e})", file=sys.stderr)
+        print(f"Error: Could not read file ({e}).", file=sys.stderr)
         sys.exit(1)
 
     result = bin_to_ca65(data, args.segment, args.label, args.cols)
@@ -85,7 +84,7 @@ def run():
         main()
         sys.stdout.flush()
     except BrokenPipeError:
-        # 出力先 (head など) が先に閉じた場合は、エラーを出さずに終了する
+        # Exit quietly if the output consumer (such as `head`) closes the pipe first.
         os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
         sys.exit(1)
 

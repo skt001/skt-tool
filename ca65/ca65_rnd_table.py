@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
 """
-ca65_rnd_table.py -- ca65 向け 乱数参照テーブル (.byte) 生成ツール
+ca65_rnd_table.py -- Generate ca65 random lookup tables (.byte)
 
-用途:
-    0x00〜0xFF の全値がちょうど 1 回ずつ現れる 256 バイトの並べ替え表を作り、
-    ca65 の .byte 行として出力します。ゲームの乱数参照テーブルなどに使います。
-入出力:
-    入力: 生成バイト数 (引数)、シード (任意)
-    出力: 標準出力に ca65 ソーステキストを書き出します
-使用例:
+Usage:
+    Create a 256-byte permutation containing every value from 0x00 to 0xFF exactly once
+    and print it as ca65 .byte lines. Useful for game random lookup tables.
+Input/output:
+    Input: output size (argument) and optional seed
+    Output: ca65 source text to stdout
+Examples:
     python3 ca65_rnd_table.py 256
     python3 ca65_rnd_table.py 256 --seed 0x12345678
     python3 ca65_rnd_table.py 512 --label RND_TABLE
-依存: Python 3.9 以上 (標準ライブラリのみ)
+Dependencies: Python 3.9+ (standard library only)
 """
 
 import argparse
@@ -23,7 +23,7 @@ from pathlib import Path
 
 
 def xorshift32(state: int) -> int:
-    """32-bit Xorshift による擬似乱数生成"""
+    """Generate a pseudorandom value using 32-bit Xorshift."""
     state ^= (state << 13) & 0xFFFFFFFF
     state ^= (state >> 17) & 0xFFFFFFFF
     state ^= (state << 5) & 0xFFFFFFFF
@@ -32,8 +32,8 @@ def xorshift32(state: int) -> int:
 
 def shuffled_0_255(state: int) -> tuple[list[int], int]:
     """
-    0〜255 の数値を重複なしで並べ替えた 256 バイトの配列を生成。
-    アルゴリズム: Fisher-Yates シャッフル
+    Generate a 256-byte permutation of values 0 through 255.
+    Algorithm: Fisher-Yates shuffle.
     """
     arr = list(range(256))
     for i in range(255, 0, -1):
@@ -44,19 +44,19 @@ def shuffled_0_255(state: int) -> tuple[list[int], int]:
 
 
 def positive_int(text: str) -> int:
-    """argparse 用: 1 以上の整数"""
+    """argparse type: positive integer."""
     value = int(text)
     if value < 1:
-        raise argparse.ArgumentTypeError("1 以上の整数を指定してください")
+        raise argparse.ArgumentTypeError("Value must be a positive integer.")
     return value
 
 
 def seed_value(text: str) -> int:
-    """argparse 用: 1〜0xFFFFFFFF のシード (0 は Xorshift32 が変化しないため不可)"""
+    """argparse type: seed from 1 to 0xFFFFFFFF (zero is invalid for Xorshift32)."""
     value = int(text, 0)
     if not 1 <= value <= 0xFFFFFFFF:
         raise argparse.ArgumentTypeError(
-            "1〜0xFFFFFFFF の範囲で指定してください (0 は Xorshift32 が変化せず乱数にならないため不可)"
+            "Seed must be between 1 and 0xFFFFFFFF (zero produces no variation with Xorshift32)."
         )
     return value
 
@@ -64,51 +64,51 @@ def seed_value(text: str) -> int:
 def main():
     parser = argparse.ArgumentParser(
         prog=Path(__file__).name,
-        description="ca65 アセンブラ向け 乱数参照テーブル (.byte) 出力ツール",
+        description="Generate a random lookup table as ca65 .byte source.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
-【動作・アルゴリズムの説明】
+Operation and algorithm:
   1. 32-bit Xorshift32
-     高速で周期の長い擬似乱数生成器です。シードを省略した場合は、
-     Python の secrets モジュールで 1〜0xFFFFFFFF のシードを自動生成します。
+     A fast pseudorandom generator with a long period. If no seed is provided,
+     a seed from 1 to 0xFFFFFFFF is generated with Python's secrets module.
 
-  2. Fisher-Yates (Knuth) シャッフル
-     0 から 255 までの値を隙間なく詰めた配列を用意し、末尾から順に乱数位置と
-     入れ替えることで「0〜255 の全値がちょうど 1 回ずつ現れる配列」を作ります。
-     乱数は「状態 % (i+1)」で範囲に丸めるため、わずかな偏りがあります。
-     また 32bit シードで作れる並びは、全 256! 通りのごく一部です。
-     (暗号用途には使えません)
+  2. Fisher-Yates (Knuth) shuffle
+     Start with an array containing every value from 0 to 255, then swap each
+     element from the end with a random position. This creates a permutation
+     containing each value exactly once. Using state % (i+1) introduces slight
+     modulo bias. A 32-bit seed can produce only a tiny fraction of all 256!
+     possible permutations. This is not suitable for cryptographic use.
 
-  3. ブロック出力
-     指定バイト数 (num_bytes) に達するまで、256 バイト単位で新しい並べ替えを作って
-     出力します。端数は最後のブロックの先頭から必要な分だけ使います。
-     ブロックをまたぐと同じ値が再び現れます。
+  3. Block output
+     Generate and output new 256-byte permutations until the requested
+     num_bytes is reached. Use only the required prefix of the final block.
+     Values may repeat across blocks.
 
-【使用例】
-  python3 ca65_rnd_table.py 256                      # 256 バイトの乱数テーブル
-  python3 ca65_rnd_table.py 256 --seed 0x12345678    # シード指定で同じ結果を再現
-  python3 ca65_rnd_table.py 512 --label RND_TABLE    # ラベル名・サイズを指定
+Examples:
+  python3 ca65_rnd_table.py 256                      # 256-byte random table
+  python3 ca65_rnd_table.py 256 --seed 0x12345678    # Reproducible output
+  python3 ca65_rnd_table.py 512 --label RND_TABLE    # Set label and size
 """
     )
     parser.add_argument(
         "num_bytes", nargs="?", type=positive_int, default=256,
-        help="生成する総バイト数 (既定: 256)"
+        help="Total number of bytes to generate (default: 256)"
     )
     parser.add_argument(
         "--seed", type=seed_value, default=None, metavar="HEX/INT",
-        help="Xorshift32 用シード。1〜0xFFFFFFFF (例: 0x12345678)。省略時はランダム"
+        help="Xorshift32 seed, 1 to 0xFFFFFFFF (e.g. 0x12345678); random if omitted"
     )
     parser.add_argument(
         "--segment", default="RODATA", metavar="NAME",
-        help="出力するセグメント名 (既定: RODATA)"
+        help="Output segment name (default: RODATA)"
     )
     parser.add_argument(
         "--label", default=None, metavar="NAME",
-        help="出力ラベル名 (既定: RND_<バイト数>)"
+        help="Output label (default: RND_<byte_count>)"
     )
     parser.add_argument(
         "--cols", type=positive_int, default=16, metavar="N",
-        help="1 行あたりに出力する要素数 (既定: 16)"
+        help="Values per output line (default: 16)"
     )
 
     args = parser.parse_args()
@@ -148,7 +148,7 @@ def run():
         main()
         sys.stdout.flush()
     except BrokenPipeError:
-        # 出力先 (head など) が先に閉じた場合は、エラーを出さずに終了する
+        # Exit quietly if the output consumer (such as `head`) closes the pipe first.
         os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
         sys.exit(1)
 

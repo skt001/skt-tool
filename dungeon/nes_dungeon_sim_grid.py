@@ -1,19 +1,20 @@
 #!/usr/bin/env python3
 """
-nes_dungeon_sim_grid.py -- NES風ダンジョン生成シミュレータ (グリッド分割方式)
+nes_dungeon_sim_grid.py -- NES-style dungeon generator (grid layout)
 
-用途:
-    32x30 のマップを固定の 4x3 グリッドに分割し、各セルに確率で部屋を作り、
-    隣り合う部屋を確率で通路 (L 字) でつないで、ダンジョンを文字で表示します。
-    --sim で全 256 シードの統計 (部屋数・通路/扉の平均) を集計できます。
-入出力:
-    入力: シード 0〜255 (省略時はランダム) と部屋サイズのオプション
-    出力: 標準出力にマップと統計を書き出します
-使用例:
-    python3 nes_dungeon_sim_grid.py            # ランダムシード
-    python3 nes_dungeon_sim_grid.py 42         # シード指定
-    python3 nes_dungeon_sim_grid.py --sim      # 全 256 シードの統計
-依存: 標準ライブラリのみ
+Usage:
+    Divide a 32x30 map into a fixed 4x3 grid, probabilistically create rooms
+    in each cell, and probabilistically connect adjacent rooms with L-shaped
+    corridors. Use --sim to summarize all 256 seeds (room counts, average
+    corridors, and doors).
+Input/output:
+    Input: seed 0-255 (random if omitted) and room-size options
+    Output: map and statistics to stdout
+Examples:
+    python3 nes_dungeon_sim_grid.py            # Random seed
+    python3 nes_dungeon_sim_grid.py 42         # Specify a seed
+    python3 nes_dungeon_sim_grid.py --sim      # Statistics for all 256 seeds
+Dependencies: Python standard library only
 """
 
 import argparse
@@ -24,7 +25,7 @@ from collections import Counter
 from pathlib import Path
 
 # =============================================================================
-# 定数
+# Constants
 # =============================================================================
 MAP_W = 32
 MAP_H = 30
@@ -35,9 +36,9 @@ GRID_H = 3
 ROOM_MIN = 4
 ROOM_MAX = 8
 
-# 確率は 8bit 乱数との比較 (乱数 < 閾値) で表す。確率 = 閾値 / 256
-PROB_ROOM = 230   # セルに部屋を作る確率 (約 0.9)
-PROB_LINK = 205   # 隣り合う部屋を通路でつなぐ確率 (約 0.8)
+# Probability is tested by comparing an 8-bit value with a threshold: threshold / 256.
+PROB_ROOM = 230   # Probability of creating a room in a cell (about 0.9)
+PROB_LINK = 205   # Probability of connecting adjacent rooms (about 0.8)
 PROB_HALF = 128   # 1/2
 
 TILE_EMPTY    = ' '
@@ -51,9 +52,9 @@ TILE_STAIR_DN = '>'
 
 
 # =============================================================================
-# 乱数 (NES 相当: 8bit の表引き・XOR・比較・減算だけで構成)
+# RNG (NES-style: 8-bit lookup, XOR, comparison, and subtraction only)
 # =============================================================================
-# 0x00〜0xFF を 1 回ずつ含む並べ替え (256 要素)
+# Permutation containing every value from 0x00 to 0xFF exactly once (256 values)
 RND_256 = [
     0x96,0x14,0xB2,0x1A,0xAE,0xB8,0x16,0xC9,0xE9,0x8F,0x08,0x80,0x03,0xB6,0x92,0xC2,
     0x27,0xC6,0xB3,0xE2,0xFE,0x3B,0x8D,0x42,0x0C,0x0F,0x45,0xBE,0x74,0x86,0xC0,0xDE,
@@ -72,7 +73,7 @@ RND_256 = [
     0xF0,0xFB,0x15,0xEE,0x1B,0x88,0x32,0x22,0xB5,0xD5,0xBF,0xF3,0xA7,0x90,0x31,0x1F,
     0xB0,0xE0,0xA9,0x29,0xF8,0x02,0x64,0x04,0x01,0x72,0x1E,0x7D,0x30,0x60,0x75,0x5F,
 ]
-# 0x34 を除く 0x00〜0xFF を 1 回ずつ含む (255 要素)
+# Contains each value from 0x00 to 0xFF once, except 0x34 (255 values)
 RND_255 = [
     0xB9,0x94,0xD6,0x6D,0x73,0xE1,0xFF,0x8C,0xF9,0x0E,0xDC,0x64,0x57,0xF1,0xEC,0x44,
     0x7A,0xE2,0x09,0x1C,0x29,0x37,0x2B,0x91,0x02,0x9C,0xE5,0x76,0x7C,0x1A,0x04,0xE7,
@@ -94,7 +95,7 @@ RND_255 = [
 
 
 def mg_mod(a, b):
-    """8bit の剰余 (減算の繰り返し。b が 0 のときは 0)"""
+    """8-bit modulo by repeated subtraction (returns 0 when b is 0)."""
     a, b = a & 0xFF, b & 0xFF
     if b == 0:
         return 0
@@ -104,9 +105,9 @@ def mg_mod(a, b):
 
 
 class RNG:
-    """2 本の表を周期 256 / 255 で読み、XOR した 8bit 値を返す乱数
+    """Read two tables with periods 256 and 255 and return their 8-bit XOR.
 
-    seed (0〜255) は 2 本の読み出し位置の初期値を決める。
+    The seed (0-255) sets the initial read positions in both tables.
     """
 
     def __init__(self, seed):
@@ -124,19 +125,20 @@ class RNG:
 
 
 def chance(rng, threshold):
-    """8bit 乱数が threshold 未満なら True (確率 threshold/256)"""
+    """Return True when the 8-bit random value is below threshold (probability threshold/256)."""
     return rng.next() < threshold
 
 
 def rand_range(rng, lo, hi):
-    """lo〜hi (両端を含む) の整数。幅 (hi-lo+1) は 255 以下"""
+    """Return an integer from lo to hi, inclusive (range width must be at most 255)."""
     return lo + mg_mod(rng.next(), hi - lo + 1)
 
 
 def rand_index(rng, n):
-    """0〜n-1 の整数 (n は 1 以上 65535 以下)。
+    """Return an integer from 0 to n-1 (1 <= n <= 65535).
 
-    候補数が 255 を超えうるので、2 バイトを連結した 16bit 値を減算の繰り返しで剰余にする。
+    Since there may be more than 255 candidates, reduce a combined 16-bit value
+    using repeated subtraction.
     """
     hi = rng.next()
     lo = rng.next()
@@ -304,7 +306,7 @@ def place_stairs(grid, rng):
     if not up:
         return
     reachable = reachable_tiles(grid, up)
-    # 集合の走査順に依存しないよう、座標順に並べてから選ぶ
+    # Sort by coordinates before choosing so the result does not depend on set iteration order.
     candidates = sorted(p for p in reachable if grid[p[1]][p[0]] == TILE_FLOOR)
     if candidates:
         down = candidates[rand_index(rng, len(candidates))]
@@ -322,7 +324,7 @@ def print_map(grid):
     for row in grid:
         print('│ ' + "".join(row) + ' │')
     print('└' + border + '┘')
-    print("凡例:  空  -壁  |壁  .床  #通路  +扉  <上り  >下り")
+    print("Legend: space=empty  -=horizontal wall  |=vertical wall  .=floor  #=corridor  +=door  <=up stairs  >=down stairs")
 
 
 def generate(seed, minw, minh, maxw, maxh):
@@ -337,13 +339,13 @@ def generate(seed, minw, minh, maxw, maxh):
     n_corr = count_tiles(grid, TILE_CORRIDOR)
     n_door = count_tiles(grid, TILE_DOOR)
 
-    print(f"seed={seed}  {n_conn}室生成  通路{n_corr} 扉{n_door}")
+    print(f"seed={seed}  rooms={n_conn}  corridors={n_corr} doors={n_door}")
     print(f"  size={minw}-{maxw}x{minh}-{maxh}  grid={GRID_W}x{GRID_H}")
     print_map(grid)
 
 
 def run_sim(minw, minh, maxw, maxh):
-    """全 256 シードで部屋配置と通路を生成し、統計を表示する"""
+    """Generate rooms and corridors for all 256 seeds and print statistics."""
     conn_counts = Counter()
     corr_total = 0
     door_total = 0
@@ -360,45 +362,46 @@ def run_sim(minw, minh, maxw, maxh):
         corr_total += count_tiles(grid, TILE_CORRIDOR)
         door_total += count_tiles(grid, TILE_DOOR)
 
-    print(f"全{total}seed  size={minw}-{maxw}x{minh}-{maxh}  grid={GRID_W}x{GRID_H}")
+    print(f"All {total} seeds  size={minw}-{maxw}x{minh}-{maxh}  grid={GRID_W}x{GRID_H}")
     print()
-    print(f"{'接続室数':>6}  {'件数':>4}  {'割合':>6}  分布")
+    print(f"{'Connected':>10}  {'Count':>5}  {'Share':>6}  Distribution")
     for n in sorted(conn_counts):
         bar = '█' * (conn_counts[n] * 40 // total)
-        print(f"    {n:2d}室  {conn_counts[n]:3d}件  {conn_counts[n]/total*100:5.1f}%  {bar}")
+        print(f"    {n:2d} rooms  {conn_counts[n]:3d}  {conn_counts[n]/total*100:5.1f}%  {bar}")
 
     print()
-    print(f"--- 通路統計 (全{total}seed平均) ---")
-    print(f"  通路タイル: {corr_total/total:.1f}  扉タイル: {door_total/total:.1f}")
+    print(f"--- Corridor statistics (average across {total} seeds) ---")
+    print(f"  Corridor tiles: {corr_total/total:.1f}  Door tiles: {door_total/total:.1f}")
 
 
 def seed_value(text):
-    """argparse 用: 0〜255 のシード"""
+    """argparse type: seed from 0 to 255."""
     value = int(text)
     if not 0 <= value <= 255:
-        raise argparse.ArgumentTypeError("0〜255 の整数を指定してください")
+        raise argparse.ArgumentTypeError("Seed must be an integer from 0 to 255.")
     return value
 
 
 def main():
     parser = argparse.ArgumentParser(
         prog=Path(__file__).name,
-        description='NES風ダンジョンシミュレータ (グリッド分割方式)',
-        epilog="""例:
-  python3 nes_dungeon_sim_grid.py            ← ランダムシード
-  python3 nes_dungeon_sim_grid.py 42         ← シード指定
-  python3 nes_dungeon_sim_grid.py --sim      ← 全256シードの統計
+        description='NES-style dungeon generator (grid layout)',
+        epilog="""Examples:
+  python3 nes_dungeon_sim_grid.py            # Random seed
+  python3 nes_dungeon_sim_grid.py 42         # Specify a seed
+  python3 nes_dungeon_sim_grid.py --sim      # Statistics for all 256 seeds
 
-マップを固定グリッド(4x3)に分割し、確率で部屋を生成・隣接接続します。
-乱数は 8bit の表引きだけで構成した NES 相当のものです。""",
+Divide the map into a fixed 4x3 grid and probabilistically create rooms and
+connect adjacent rooms. The RNG uses only 8-bit lookup tables, like an
+NES-style implementation.""",
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    parser.add_argument('seed', nargs='?', type=seed_value, default=None, metavar='SEED', help='乱数シード 0〜255 (省略時はランダム)')
-    parser.add_argument('--minw', type=int, default=ROOM_MIN, metavar='N', help='部屋幅の最小値 壁込み (既定: 4)')
-    parser.add_argument('--minh', type=int, default=ROOM_MIN, metavar='N', help='部屋高さの最小値 壁込み (既定: 4)')
-    parser.add_argument('--maxw', type=int, default=ROOM_MAX, metavar='N', help='部屋幅の最大値 壁込み (既定: 8)')
-    parser.add_argument('--maxh', type=int, default=ROOM_MAX, metavar='N', help='部屋高さの最大値 壁込み (既定: 8)')
-    parser.add_argument('--sim', action='store_true', help='全256シードを網羅して統計を集計')
+    parser.add_argument('seed', nargs='?', type=seed_value, default=None, metavar='SEED', help='Random seed, 0-255 (random if omitted)')
+    parser.add_argument('--minw', type=int, default=ROOM_MIN, metavar='N', help='Minimum room width, including walls (default: 4)')
+    parser.add_argument('--minh', type=int, default=ROOM_MIN, metavar='N', help='Minimum room height, including walls (default: 4)')
+    parser.add_argument('--maxw', type=int, default=ROOM_MAX, metavar='N', help='Maximum room width, including walls (default: 8)')
+    parser.add_argument('--maxh', type=int, default=ROOM_MAX, metavar='N', help='Maximum room height, including walls (default: 8)')
+    parser.add_argument('--sim', action='store_true', help='Collect statistics across all 256 seeds')
     args = parser.parse_args()
 
     if args.sim:
@@ -413,7 +416,7 @@ def run():
         main()
         sys.stdout.flush()
     except BrokenPipeError:
-        # 出力先 (head など) が先に閉じた場合は、エラーを出さずに終了する
+        # Exit quietly if the output consumer (such as `head`) closes the pipe first.
         os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
         sys.exit(1)
 

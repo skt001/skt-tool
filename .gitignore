@@ -3,3 +3,8 @@ __pycache__/
 .venv/
 venv/
 *.ttf
+
+# OS metadata
+.DS_Store
+Thumbs.db
+desktop.ini

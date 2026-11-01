@@ -1,20 +1,21 @@
 #!/usr/bin/env python3
 """
-nes_dungeon_sim_aabb.py -- NES風ダンジョン生成シミュレータ (AABB拒否法)
+nes_dungeon_sim_aabb.py -- NES-style dungeon generator (AABB rejection)
 
-用途:
-    32x30 のマップに、ランダムな大きさの部屋を重ならないように置き (重なる配置は棄却)、
-    座標順に並べた部屋どうしを L 字の通路でつないで、ダンジョンを文字で表示します。
-    --sim で全 256 シードの統計 (接続室数・孤立室数・通路/扉の平均) を集計できます。
-入出力:
-    入力: シード 0〜255 (省略時はランダム) と部屋サイズなどのオプション
-    出力: 標準出力にマップと統計を書き出します
-使用例:
-    python3 nes_dungeon_sim_aabb.py                    # ランダムシード
-    python3 nes_dungeon_sim_aabb.py 42                 # シード指定
-    python3 nes_dungeon_sim_aabb.py --sim              # 全 256 シードの統計
-    python3 nes_dungeon_sim_aabb.py --sim --attempt 5  # 部屋数を絞った浅い階
-依存: 標準ライブラリのみ
+Usage:
+    Place randomly sized rooms on a 32x30 map without overlap (rejecting
+    overlapping placements), connect rooms in coordinate order with L-shaped
+    corridors, and print the dungeon as text. Use --sim to summarize all 256
+    seeds (connected and isolated rooms, average corridors and doors).
+Input/output:
+    Input: seed 0-255 (random if omitted) and room-size options
+    Output: map and statistics to stdout
+Examples:
+    python3 nes_dungeon_sim_aabb.py                    # Random seed
+    python3 nes_dungeon_sim_aabb.py 42                 # Specify a seed
+    python3 nes_dungeon_sim_aabb.py --sim              # Statistics for all 256 seeds
+    python3 nes_dungeon_sim_aabb.py --sim --attempt 5  # Fewer rooms for a shallow floor
+Dependencies: Python standard library only
 """
 
 import argparse
@@ -25,7 +26,7 @@ from collections import Counter
 from pathlib import Path
 
 # =============================================================================
-# 定数
+# Constants
 # =============================================================================
 MAP_W = 32
 MAP_H = 30
@@ -51,9 +52,9 @@ TILE_CHAR = {
 }
 
 # =============================================================================
-# 乱数 (NES 相当: 8bit の表引き・XOR・比較・減算だけで構成)
+# RNG (NES-style: 8-bit lookup, XOR, comparison, and subtraction only)
 # =============================================================================
-# 0x00〜0xFF を 1 回ずつ含む並べ替え (256 要素)
+# Permutation containing every value from 0x00 to 0xFF exactly once (256 values)
 RND_256 = [
     0x96,0x14,0xB2,0x1A,0xAE,0xB8,0x16,0xC9,0xE9,0x8F,0x08,0x80,0x03,0xB6,0x92,0xC2,
     0x27,0xC6,0xB3,0xE2,0xFE,0x3B,0x8D,0x42,0x0C,0x0F,0x45,0xBE,0x74,0x86,0xC0,0xDE,
@@ -72,7 +73,7 @@ RND_256 = [
     0xF0,0xFB,0x15,0xEE,0x1B,0x88,0x32,0x22,0xB5,0xD5,0xBF,0xF3,0xA7,0x90,0x31,0x1F,
     0xB0,0xE0,0xA9,0x29,0xF8,0x02,0x64,0x04,0x01,0x72,0x1E,0x7D,0x30,0x60,0x75,0x5F,
 ]
-# 0x34 を除く 0x00〜0xFF を 1 回ずつ含む (255 要素)
+# Contains each value from 0x00 to 0xFF once, except 0x34 (255 values)
 RND_255 = [
     0xB9,0x94,0xD6,0x6D,0x73,0xE1,0xFF,0x8C,0xF9,0x0E,0xDC,0x64,0x57,0xF1,0xEC,0x44,
     0x7A,0xE2,0x09,0x1C,0x29,0x37,0x2B,0x91,0x02,0x9C,0xE5,0x76,0x7C,0x1A,0x04,0xE7,
@@ -94,7 +95,7 @@ RND_255 = [
 
 
 def mg_mod(a, b):
-    """8bit の剰余 (減算の繰り返し。b が 0 のときは 0)"""
+    """8-bit modulo by repeated subtraction (returns 0 when b is 0)."""
     a, b = a & 0xFF, b & 0xFF
     if b == 0:
         return 0
@@ -104,9 +105,9 @@ def mg_mod(a, b):
 
 
 class RNG:
-    """2 本の表を周期 256 / 255 で読み、XOR した 8bit 値を返す乱数
+    """Read two tables with periods 256 and 255 and return their 8-bit XOR.
 
-    seed (0〜255) は 2 本の読み出し位置の初期値を決める。
+    The seed (0-255) sets the initial read positions in both tables.
     """
 
     def __init__(self, seed):
@@ -304,13 +305,13 @@ def generate(seed, minw, minh, maxw, maxh, attempts, maxroom):
     n_door = count_tile(buf, TILE_DOOR)
 
     if n_iso > 0:
-        label = f"{n_conn}室接続 + {n_iso}室孤立 (計{n_all}室)"
+        label = f"{n_conn} connected + {n_iso} isolated (total {n_all})"
     elif n_all == 1:
-        label = "大広間"
+        label = "Great Hall"
     else:
-        label = f"{n_all}室"
+        label = f"{n_all} rooms"
 
-    print(f"seed={seed}  {label}  通路{n_corr} 扉{n_door}")
+    print(f"seed={seed}  {label}  corridors={n_corr} doors={n_door}")
     print(f"  size={minw}-{maxw}x{minh}-{maxh}  attempt={attempts}  maxroom={maxroom}")
 
     print_map(buf)
@@ -326,11 +327,11 @@ def print_map(buf):
         row += ' │'
         print(row)
     print('└' + border + '┘')
-    print("凡例:  空  -壁  |壁  .床  #通路  +扉  <上り  >下り")
+    print("Legend: space=empty  -=horizontal wall  |=vertical wall  .=floor  #=corridor  +=door  <=up stairs  >=down stairs")
 
 
 def run_sim(minw, minh, maxw, maxh, attempt, maxroom):
-    """全 256 シードで部屋配置と通路を生成し、統計を表示する"""
+    """Generate rooms and corridors for all 256 seeds and print statistics."""
     conn_counts = Counter()
     iso_counts  = Counter()
     corr_total  = 0
@@ -351,60 +352,61 @@ def run_sim(minw, minh, maxw, maxh, attempt, maxroom):
         corr_total += count_tile(buf, TILE_CORRIDOR)
         door_total += count_tile(buf, TILE_DOOR)
 
-    print(f"全{total}seed  size={minw}-{maxw}x{minh}-{maxh}  attempt={attempt}  maxroom={maxroom}")
+    print(f"All {total} seeds  size={minw}-{maxw}x{minh}-{maxh}  attempt={attempt}  maxroom={maxroom}")
     print()
 
-    print(f"{'接続室数':>6}  {'件数':>4}  {'割合':>6}  分布")
+    print(f"{'Connected':>10}  {'Count':>5}  {'Share':>6}  Distribution")
     for n in sorted(conn_counts):
         bar = '█' * (conn_counts[n] * 40 // total)
-        print(f"    {n:2d}室  {conn_counts[n]:3d}件  {conn_counts[n]/total*100:5.1f}%  {bar}")
+        print(f"    {n:2d} rooms  {conn_counts[n]:3d}  {conn_counts[n]/total*100:5.1f}%  {bar}")
     print()
 
-    print(f"{'孤立室数':>6}  {'件数':>4}  {'割合':>6}  分布")
+    print(f"{'Isolated':>10}  {'Count':>5}  {'Share':>6}  Distribution")
     for n in sorted(iso_counts):
         bar = '█' * (iso_counts[n] * 40 // total)
-        print(f"    {n:2d}室  {iso_counts[n]:3d}件  {iso_counts[n]/total*100:5.1f}%  {bar}")
+        print(f"    {n:2d} rooms  {iso_counts[n]:3d}  {iso_counts[n]/total*100:5.1f}%  {bar}")
 
     total_iso = sum(n * c for n, c in iso_counts.items())
     has_iso   = sum(c for n, c in iso_counts.items() if n > 0)
-    print(f"  → {has_iso}/{total}マップ ({has_iso/total*100:.0f}%) に孤立部屋あり  平均{total_iso/total:.1f}室/マップ")
+    print(f"  → {has_iso}/{total} maps ({has_iso/total*100:.0f}%) have isolated rooms; average {total_iso/total:.1f} rooms/map")
 
     print()
-    print(f"--- 通路統計 (全{total}seed平均) ---")
-    print(f"  通路タイル: {corr_total/total:.1f}  扉タイル: {door_total/total:.1f}")
+    print(f"--- Corridor statistics (average across {total} seeds) ---")
+    print(f"  Corridor tiles: {corr_total/total:.1f}  Door tiles: {door_total/total:.1f}")
 
 
 def seed_value(text):
-    """argparse 用: 0〜255 のシード"""
+    """argparse type: seed from 0 to 255."""
     value = int(text)
     if not 0 <= value <= 255:
-        raise argparse.ArgumentTypeError("0〜255 の整数を指定してください")
+        raise argparse.ArgumentTypeError("Seed must be an integer from 0 to 255.")
     return value
 
 
 def main():
     parser = argparse.ArgumentParser(
         prog=Path(__file__).name,
-        description='NES風ダンジョンシミュレータ (AABB拒否法)',
-        epilog="""例:
-  python3 nes_dungeon_sim_aabb.py                    ← ランダムシード
-  python3 nes_dungeon_sim_aabb.py 42                 ← シード指定
-  python3 nes_dungeon_sim_aabb.py --sim              ← 全256シードの統計
-  python3 nes_dungeon_sim_aabb.py --sim --attempt 5  ← 浅い階 (少部屋)
+        description='NES-style dungeon generator (AABB rejection)',
+        epilog="""Examples:
+  python3 nes_dungeon_sim_aabb.py                    # Random seed
+  python3 nes_dungeon_sim_aabb.py 42                 # Specify a seed
+  python3 nes_dungeon_sim_aabb.py --sim              # Statistics for all 256 seeds
+  python3 nes_dungeon_sim_aabb.py --sim --attempt 5  # Shallow floor (fewer rooms)
 
-部屋を重ならないようにランダム配置し (重なる配置は棄却)、座標順に並べた部屋どうしを
-L字通路でつなぎます。L字通路は2通りの経路を事前スキャンし、壁にぶつかる数が少ない方を採用します。
-乱数は 8bit の表引きだけで構成した NES 相当のものです。""",
+Randomly place non-overlapping rooms (rejecting overlaps) and connect them in
+coordinate order with L-shaped corridors. Each corridor checks both possible
+routes in advance and uses the one that crosses fewer walls.
+The RNG uses only 8-bit lookup tables, like an NES-style implementation.""",
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    parser.add_argument('seed', nargs='?', type=seed_value, default=None, metavar='SEED', help='乱数シード 0〜255 (省略時はランダム)')
-    parser.add_argument('--minw', type=int, default=4, metavar='N', help='部屋幅の最小値 壁込み (既定: 4)')
-    parser.add_argument('--minh', type=int, default=4, metavar='N', help='部屋高さの最小値 壁込み (既定: 4)')
-    parser.add_argument('--maxw', type=int, default=16, metavar='N', help='部屋幅の最大値 壁込み (既定: 16)')
-    parser.add_argument('--maxh', type=int, default=16, metavar='N', help='部屋高さの最大値 壁込み (既定: 16)')
-    parser.add_argument('--attempt', type=int, default=80, metavar='N', help='部屋の配置が連続で失敗してよい回数 (成功すると数え直し。超えたら配置を打ち切る) (既定: 80)')
-    parser.add_argument('--maxroom', type=int, default=8, metavar='N', help='通路でつなぐ部屋数の上限 (超えた分の部屋は孤立室になる) (既定: 8)')
-    parser.add_argument('--sim', action='store_true', help='全256シードを網羅して統計を集計')
+    parser.add_argument('seed', nargs='?', type=seed_value, default=None, metavar='SEED', help='Random seed, 0-255 (random if omitted)')
+    parser.add_argument('--minw', type=int, default=4, metavar='N', help='Minimum room width, including walls (default: 4)')
+    parser.add_argument('--minh', type=int, default=4, metavar='N', help='Minimum room height, including walls (default: 4)')
+    parser.add_argument('--maxw', type=int, default=16, metavar='N', help='Maximum room width, including walls (default: 16)')
+    parser.add_argument('--maxh', type=int, default=16, metavar='N', help='Maximum room height, including walls (default: 16)')
+    parser.add_argument('--attempt', type=int, default=80, metavar='N', help='Consecutive failed placement attempts allowed; reset after success (default: 80)')
+    parser.add_argument('--maxroom', type=int, default=8, metavar='N', help='Maximum rooms to connect; additional rooms remain isolated (default: 8)')
+    parser.add_argument('--sim', action='store_true', help='Collect statistics across all 256 seeds')
     args = parser.parse_args()
 
     args.minw    = max(4, min(args.minw, MAP_W))
@@ -426,7 +428,7 @@ def run():
         main()
         sys.stdout.flush()
     except BrokenPipeError:
-        # 出力先 (head など) が先に閉じた場合は、エラーを出さずに終了する
+        # Exit quietly if the output consumer (such as `head`) closes the pipe first.
         os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
         sys.exit(1)
 
